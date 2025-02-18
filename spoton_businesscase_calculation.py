@@ -38,15 +38,13 @@ def bid_balancing_market(df):
 
     # step 1: set all hours where Act == 1 to bid on UP direction #####
     # additional constraint: Customer revenues for mFRR up: 80% (capacity + energy activation) - 50€/MWh > 0
-    revenue_up = 0.8 * (df2['up_cap_price'] + df2['up_energy_price']) - 50
+    revenue_up = 0.8 * (df2['up_capacity_price'] + df2['up_energy_price']) - 50
     df2.loc[(df['boiler_active_dayahead'] == 1) & (revenue_up > 0), 'Bid_UP'] = 1
 
     # set all hours where Act == 0 and Dayahead energy price is below 50 to bid on DOWN direction #####
     df2.loc[(df['boiler_active_dayahead'] == 0) & (df['Day-ahead Energy Price']<50), 'Bid_DOWN'] = 1
     
-
     return df2
-
 
 def calculate_bid_acceptance(df):
     """
@@ -55,30 +53,31 @@ def calculate_bid_acceptance(df):
     df: the dataframe with the data
 
     outputs:
-    
+    accept_capacity_down: boolean array, True if the bid is accepted for capacity in the down direction
+    accept_energy_down: boolean array, True if the bid is accepted for energy in the down direction
+    accept_capacity_up: boolean array, True if the bid is accepted for capacity in the up direction
+    accept_energy_up: boolean array, True if the bid is accepted for energy in the up direction
     """
 
-
-    # TODO unpack variables from df
-    Pe_up = df['up_energy_price']
+    Pe_up   = df['up_energy_price']
     Pe_down = df['down_energy_price']
+    Pc_up   = df['up_capacity_price']
+    Pc_down = df['down_capacity_price']
 
-    clear_price_up = 0
-    clear_price_down = 0
-    Pc_up = df['up_cap_price']
-    Pc_down = df['down_cap_price']
-    Ep_up = df['up_energy_price']
-    Ep_down = df['down_energy_price']
+    clear_price_up   = 0. #df['up_energy_cleared_price']
+    clear_price_down = 0. #df['down_energy_cleared_price']
+    Eq_price_up   =    df['up_equivalent_price']
+    Eq_price_down =    df['down_equivalent_price']
     
     # calculate bid price equivalent
     Eq_bid_price_up = Pc_up + Pe_up * df['Bid_UP']
     Eq_bid_price_down = Pc_down - Pe_down * df['Bid_DOWN']
 
     # check for acceptance
-    accept_capacity_down = Eq_bid_price_down < Ep_down
-    accept_capacity_up   = Eq_bid_price_up   < Ep_up
-    accept_energy_down = (Eq_bid_price_down < Ep_down) & (Pe_down < clear_price_down)
-    accept_energy_up   = (Eq_bid_price_up   < Ep_up)   & (Pe_up   < clear_price_up)
+    accept_capacity_down = Eq_bid_price_down < Eq_price_down
+    accept_capacity_up   = Eq_bid_price_up   < Eq_price_up
+    accept_energy_down = (Eq_bid_price_down < Eq_price_down) & (Pe_down < clear_price_down)
+    accept_energy_up   = (Eq_bid_price_up   < Eq_price_up)   & (Pe_up   < clear_price_up)
 
     return accept_capacity_down, accept_energy_down, accept_capacity_up, accept_energy_up
 
@@ -103,15 +102,14 @@ def calculate_revenue(df, Palt):
         # if we bid in UP direction
         if df.loc[idx, 'Bid_UP'] == 1:
 
-            df.at[idx, 'V_bal_up_capacity'] += df.at[idx,'up_cap_price'] * accept_capacity_up[idx].astype(float)
+            df.at[idx, 'V_bal_up_capacity'] += df.at[idx,'up_capacity_price'] * accept_capacity_up[idx].astype(float)
             df.loc[idx, 'V_bal_up_energy'] += df.loc[idx,'up_energy_price'] * accept_energy_up[idx].astype(float)
             df.loc[idx, 'V_energyvalue_balancing_up'] += -Palt
 
         elif df.loc[idx, 'Bid_DOWN'] == 1:
             df.loc[idx, 'V_bal_down_energy'] = df.loc[idx, 'down_energy_price'] * df.loc[idx, 'bid_acceptance_probability']
             # TODO: check this next line
-            # to check: revenues_down = + down_cap_price - down_energy_price
-            df.loc[idx, 'V_bal_down_capacity'] += df.loc[idx, 'down_cap_price'] - df.loc[idx, 'down_energy_price']
+            df.loc[idx, 'V_bal_down_capacity'] += df.loc[idx, 'down_capacity_price'] - df.loc[idx, 'down_energy_price']
             df.loc[idx, 'V_energyvalue_balancing_down'] += Palt
 
     return df
@@ -156,7 +154,7 @@ def merge_overlapping_timeframes(df1, df2):
 
     return merged_df
 
-def main(dayahead_file='dayahead_prices.csv', balancing_file='Finland - mFRR 2024 - Export for bc model.csv', Palt=50, Hs=0, Hw=0, output_file='results_eboiler.csv'):
+def main(dayahead_file='dayahead_prices.csv', balancing_file='Finland - mFRR 2024 - Export for bc model.csv', alternative_energy_price=50, Hs=0, Hw=0, output_file='results_eboiler.csv'):
     """
     Main function to process dayahead scheduling, balancing market bidding, and calculate revenues.
     """
@@ -171,7 +169,7 @@ def main(dayahead_file='dayahead_prices.csv', balancing_file='Finland - mFRR 202
     df_bal.rename(columns={'startTime': 'utc_timestamp'}, inplace=True)
     df_bal['utc_timestamp'] = df_bal['utc_timestamp'].dt.tz_localize(None)
     # NB we impute with mean values
-    df_bal = convert_to_float_and_fill(df_bal, ['up_energy_price', 'down_energy_price', 'bid_acceptance_probability'])
+    df_bal = convert_to_float_and_fill(df_bal, ['up_energy_price', 'down_energy_price','up_equivalent_price', 'down_equivalent_price','bid_acceptance_probability'])
     
     # Merge dataframes on overlapping timeframes
     df = merge_overlapping_timeframes(df_da, df_bal)
@@ -198,9 +196,9 @@ def main(dayahead_file='dayahead_prices.csv', balancing_file='Finland - mFRR 202
         # Check if the slice contains 24 rows (one for each hour)
         if len(day_slice) == 24:
             # Call functions with the selected day slice
-            day_slice = schedule_day_ahead(day_slice, Palt=50, Hs=2, Hw=4)
+            day_slice = schedule_day_ahead(day_slice, Palt=alternative_energy_price, Hs=2, Hw=4)
             day_slice = bid_balancing_market(day_slice)
-            day_slice = calculate_revenue(day_slice, Palt=50)
+            day_slice = calculate_revenue(day_slice, Palt=alternative_energy_price)
             
             # Append the processed day slice to the list
             processed_days.append(day_slice)
@@ -218,5 +216,5 @@ def main(dayahead_file='dayahead_prices.csv', balancing_file='Finland - mFRR 202
 
 if __name__ == '__main__':
     # Run the main function with default parameters
-    df_results = main(dayahead_file='dayahead_prices_finland_2024.csv', balancing_file='Finland - mFRR 2024 - Export for bc model.csv', Palt=50, Hs=2, Hw=4)
+    df_results = main(dayahead_file='dayahead_prices_finland_2024.csv', balancing_file='Finland - mFRR 2024 - Export for bc model.csv', Hs=2, Hw=4)
     df_results.to_csv('spoton_model_results.csv')
