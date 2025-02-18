@@ -38,7 +38,7 @@ def bid_balancing_market(df):
 
     # step 1: set all hours where Act == 1 to bid on UP direction #####
     # additional constraint: Customer revenues for mFRR up: 80% (capacity + energy activation) - 50€/MWh > 0
-    revenue_up = 0.8 * (df2['up_capacity_price'] + df2['up_energy_price']) - 50
+    revenue_up = 0.8 * (df2['up_capacity_price'] + df2['up_energy_price']) + df['Day-ahead Energy Price'] - 50
     df2.loc[(df['boiler_active_dayahead'] == 1) & (revenue_up > 0), 'Bid_UP'] = 1
 
     # set all hours where Act == 0 and Dayahead energy price is below 50 to bid on DOWN direction #####
@@ -232,8 +232,8 @@ if __name__ == '__main__':
     'activation_derating_factor_up':    0.3 ,
     'price_alternative_energy':         50.
     }
-    minimum_operational_hours_summer = 2
-    minimum_operational_hours_winter = 4
+    minimum_operational_hours_summer = 4
+    minimum_operational_hours_winter = 12
     # Run the main function
     df_results = main(bid_price_parameters, dayahead_file='dayahead_prices_finland_2024.csv', balancing_file='Finland - mFRR 2024 - Export for bc model.csv', Hs=minimum_operational_hours_summer, Hw=minimum_operational_hours_winter)
     df_results.to_csv('spoton_model_results.csv')
