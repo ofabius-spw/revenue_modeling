@@ -46,7 +46,7 @@ def bid_balancing_market(df):
     
     return df2
 
-def calculate_bid_acceptance(df):
+def calculate_bid_acceptance(df, bpp):
     """
     Calculate if the bid is accepted in the balancing market.
     Inputs: 
@@ -58,30 +58,36 @@ def calculate_bid_acceptance(df):
     accept_capacity_up: boolean array, True if the bid is accepted for capacity in the up direction
     accept_energy_up: boolean array, True if the bid is accepted for energy in the up direction
     """
+    # market values (cleared prices):
+    cleared_price_energy_up     = df['up_energy_price']
+    cleared_price_energy_down   = df['down_energy_price']
+    cleared_price_capacity_up   = df['up_capacity_price']
+    cleared_price_capacity_down = df['down_capacity_price']
+    equivalent_cleared_price_up    = df['up_equivalent_price']
+    equivalent_cleared_price_down  = df['down_equivalent_price']
 
-    Pe_up   = df['up_energy_price']
-    Pe_down = df['down_energy_price']
-    Pc_up   = df['up_capacity_price']
-    Pc_down = df['down_capacity_price']
+    # bidding values
+    # TO DO: add the correct column name for each variable
+    bid_price_energy_up   = bpp['bid_price_energy_up']
+    bid_price_energy_down = bpp['bid_price_energy_down']
+    bid_price_capacity_up = bpp['bid_price_capacity_up']
+    bid_price_capacity_down = bpp['bid_price_capacity_down']
+    activation_derating_factor_down  = bpp['activation_derating_factor_down']
+    activation_derating_factor_up  = bpp['activation_derating_factor_up']
 
-    clear_price_up   = 0. #df['up_energy_cleared_price']
-    clear_price_down = 0. #df['down_energy_cleared_price']
-    Eq_price_up   =    df['up_equivalent_price']
-    Eq_price_down =    df['down_equivalent_price']
     
-    # calculate bid price equivalent
-    Eq_bid_price_up = Pc_up + Pe_up * df['Bid_UP']
-    Eq_bid_price_down = Pc_down - Pe_down * df['Bid_DOWN']
-
+    equivalent_bid_price_up = bid_price_capacity_up + activation_derating_factor_up*bid_price_energy_up
+    equivalent_bid_price_down = bid_price_capacity_down - activation_derating_factor_down*bid_price_energy_down
+ 
     # check for acceptance
-    accept_capacity_down = Eq_bid_price_down < Eq_price_down
-    accept_capacity_up   = Eq_bid_price_up   < Eq_price_up
-    accept_energy_down = (Eq_bid_price_down < Eq_price_down) & (Pe_down < clear_price_down)
-    accept_energy_up   = (Eq_bid_price_up   < Eq_price_up)   & (Pe_up   < clear_price_up)
+    accept_capacity_down = equivalent_bid_price_down < equivalent_cleared_price_down
+    accept_capacity_up   = equivalent_bid_price_up < equivalent_cleared_price_up
+    accept_energy_down   = (equivalent_bid_price_down < equivalent_cleared_price_down) & (bid_price_energy_down < cleared_price_energy_down)
+    accept_energy_up     = (equivalent_bid_price_up < equivalent_cleared_price_up) & (bid_price_energy_up < cleared_price_energy_up)
 
     return accept_capacity_down, accept_energy_down, accept_capacity_up, accept_energy_up
 
-def calculate_revenue(df, Palt):
+def calculate_revenue(df, bpp):
     """
     Calculate financial benefits of e-boiler operation and balancing market participation.
 
@@ -93,8 +99,9 @@ def calculate_revenue(df, Palt):
     """
     df = df.copy()
 
+    Palt = bpp['price_alternative_energy']
     # Calculate bid acceptance for each hour in the dataframe of the day
-    accept_capacity_down, accept_energy_down, accept_capacity_up, accept_energy_up = calculate_bid_acceptance(df)
+    accept_capacity_down, accept_energy_down, accept_capacity_up, accept_energy_up = calculate_bid_acceptance(df, bpp)
 
     for idx in df.index:
         if df.loc[idx, 'boiler_active_dayahead'] == 1: # if boiler activated
@@ -154,7 +161,7 @@ def merge_overlapping_timeframes(df1, df2):
 
     return merged_df
 
-def main(dayahead_file='dayahead_prices.csv', balancing_file='Finland - mFRR 2024 - Export for bc model.csv', alternative_energy_price=50, Hs=0, Hw=0, output_file='results_eboiler.csv'):
+def main(bpp, dayahead_file='dayahead_prices.csv', balancing_file='Finland - mFRR 2024 - Export for bc model.csv', alternative_energy_price=50, Hs=0, Hw=0, output_file='results_eboiler.csv'):
     """
     Main function to process dayahead scheduling, balancing market bidding, and calculate revenues.
     """
@@ -198,7 +205,7 @@ def main(dayahead_file='dayahead_prices.csv', balancing_file='Finland - mFRR 202
             # Call functions with the selected day slice
             day_slice = schedule_day_ahead(day_slice, Palt=alternative_energy_price, Hs=2, Hw=4)
             day_slice = bid_balancing_market(day_slice)
-            day_slice = calculate_revenue(day_slice, Palt=alternative_energy_price)
+            day_slice = calculate_revenue(day_slice, bpp)
             
             # Append the processed day slice to the list
             processed_days.append(day_slice)
@@ -215,6 +222,18 @@ def main(dayahead_file='dayahead_prices.csv', balancing_file='Finland - mFRR 202
     return df_processed
 
 if __name__ == '__main__':
-    # Run the main function with default parameters
-    df_results = main(dayahead_file='dayahead_prices_finland_2024.csv', balancing_file='Finland - mFRR 2024 - Export for bc model.csv', Hs=2, Hw=4)
+    # set bid price parameters (float)
+    bid_price_parameters = {
+    'bid_price_energy_up':              50. ,
+    'bid_price_energy_down':            8. ,
+    'bid_price_capacity_up':            4. ,
+    'bid_price_capacity_down':          10. ,
+    'activation_derating_factor_down':  0.2 ,
+    'activation_derating_factor_up':    0.3 ,
+    'price_alternative_energy':         50.
+    }
+    minimum_operational_hours_summer = 2
+    minimum_operational_hours_winter = 4
+    # Run the main function
+    df_results = main(bid_price_parameters, dayahead_file='dayahead_prices_finland_2024.csv', balancing_file='Finland - mFRR 2024 - Export for bc model.csv', Hs=minimum_operational_hours_summer, Hw=minimum_operational_hours_winter)
     df_results.to_csv('spoton_model_results.csv')
