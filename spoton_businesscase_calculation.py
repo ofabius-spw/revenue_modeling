@@ -14,6 +14,7 @@ def schedule_day_ahead(df, Palt=50, Hs=0, Hw=0):
     
     # Select the cheapest min_hours slots
     cheapest_hours = df.nsmallest(min_hours[0], 'Day-ahead Energy Price')['utc_timestamp']
+  
     df.loc[df['utc_timestamp'].isin(cheapest_hours), 'boiler_active_dayahead'] = 1
     
     # Sort remaining hours where boiler is off by price
@@ -117,11 +118,14 @@ def calculate_revenue(df, bpp):
     # Calculate bid acceptance for each hour in the dataframe of the day
     accept_capacity_down, accept_energy_down, accept_capacity_up, accept_energy_up = calculate_bid_acceptance(df, bpp)
 
+    # calculate value in dayahead market for all active hours, including the ones where we bid in the balancing market
+    df['V_dayahead'] = df['boiler_active_dayahead'] * (Palt - df['Day-ahead Energy Price'])
     for idx in df.index:
         # removed: we do not calculate valiue based on dayahead price if our bid on the market is accepted; we do not get the dayahead price then
         # if df.loc[idx, 'boiler_active_dayahead'] == 1: # if boiler activated
         #     df.loc[idx, 'V_dayahead'] = Palt - df.loc[idx, 'Day-ahead Energy Price']
         # if we bid in UP direction
+
         if df.loc[idx, 'Bid_UP'] == 1:
 
             df.at[idx, 'V_bal_up_capacity'] += df.at[idx,'up_capacity_price'] * accept_capacity_up[idx].astype(float)
@@ -218,7 +222,7 @@ def main(bpp, dayahead_file='dayahead_prices.csv', balancing_file='Finland - mFR
         # Check if the slice contains 24 rows (one for each hour)
         if len(day_slice) == 24:
             # Call functions with the selected day slice
-            day_slice = schedule_day_ahead(day_slice, Palt=alternative_energy_price, Hs=2, Hw=4)
+            day_slice = schedule_day_ahead(day_slice, Palt=alternative_energy_price, Hs=Hs, Hw=Hw)
             day_slice = bid_balancing_market(day_slice)
             day_slice = calculate_revenue(day_slice, bpp)
             
@@ -247,8 +251,8 @@ if __name__ == '__main__':
     'activation_derating_factor_up':    0.3 ,
     'price_alternative_energy':         50.
     }
-    minimum_operational_hours_summer = 4
-    minimum_operational_hours_winter = 12
+    minimum_operational_hours_summer = 0
+    minimum_operational_hours_winter = 0
     # Run the main function
     df_results = main(bid_price_parameters, dayahead_file='dayahead_prices_finland_2024.csv', balancing_file='Finland - mFRR 2024 - Export for bc model.csv', Hs=minimum_operational_hours_summer, Hw=minimum_operational_hours_winter)
     df_results.to_csv('spoton_model_results.csv')
