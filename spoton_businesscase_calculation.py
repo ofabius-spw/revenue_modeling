@@ -36,14 +36,28 @@ def bid_balancing_market(df):
     df2['Bid_UP'] = 0
     df2['Bid_DOWN'] = 0
 
-    # step 1: set all hours where Act == 1 to bid on UP direction #####
+    # set all hours where boiler is ON to bid on UP direction #####
     # additional constraint: Customer revenues for mFRR up: 80% (capacity + energy activation) - 50€/MWh > 0
     revenue_up = 0.8 * (df2['up_capacity_price'] + df2['up_energy_price']) + df['Day-ahead Energy Price'] - 50
+    # set bid in up direction if revenue is positive
     df2.loc[(df['boiler_active_dayahead'] == 1) & (revenue_up > 0), 'Bid_UP'] = 1
 
-    # set all hours where Act == 0 and Dayahead energy price is below 50 to bid on DOWN direction #####
+    # set all hours where boiler is OFF and Dayahead energy price is below 50 to bid on DOWN direction #####
     df2.loc[(df['boiler_active_dayahead'] == 0) & (df['Day-ahead Energy Price']<50), 'Bid_DOWN'] = 1
     
+
+    # for idx in range(23):
+        # if df.loc[idx, 'boiler_active_dayahead'] == 1:
+            # print('boiler status', df.loc[idx, 'boiler_active_dayahead'])
+            # print('up price:', df.loc[idx, 'up_energy_price'])
+            # print('capacity price:', df.loc[idx, 'up_capacity_price'])
+            # print('dayahead price:', df.loc[idx, 'Day-ahead Energy Price'])
+            # print('revenue_up:', revenue_up[idx])
+            # print('active:', df.loc[idx, 'boiler_active_dayahead'])
+            # print('bid up:', df2.loc[idx, 'Bid_UP'])
+            # print('boiler status after:', df2.loc[idx, 'boiler_active_dayahead'])
+            # input('Press Enter to continue...')
+
     return df2
 
 def calculate_bid_acceptance(df, bpp):
@@ -104,8 +118,9 @@ def calculate_revenue(df, bpp):
     accept_capacity_down, accept_energy_down, accept_capacity_up, accept_energy_up = calculate_bid_acceptance(df, bpp)
 
     for idx in df.index:
-        if df.loc[idx, 'boiler_active_dayahead'] == 1: # if boiler activated
-            df.loc[idx, 'V_dayahead'] = Palt - df.loc[idx, 'Day-ahead Energy Price']
+        # removed: we do not calculate valiue based on dayahead price if our bid on the market is accepted; we do not get the dayahead price then
+        # if df.loc[idx, 'boiler_active_dayahead'] == 1: # if boiler activated
+        #     df.loc[idx, 'V_dayahead'] = Palt - df.loc[idx, 'Day-ahead Energy Price']
         # if we bid in UP direction
         if df.loc[idx, 'Bid_UP'] == 1:
 
