@@ -48,9 +48,10 @@ def bid_balancing_market(df):
     # set bid in up direction if revenue is positive
     df2.loc[(df['boiler_active_dayahead'] == 1) & (revenue_up > 0), 'Bid_UP'] = 1
 
-    # set all hours where boiler is OFF and Dayahead energy price is below 50 to bid on DOWN direction #####
-    df2.loc[(df['boiler_active_dayahead'] == 0) & (df['Day-ahead Energy Price']<50), 'Bid_DOWN'] = 1
-    
+    # set all hours where boiler is OFF and Dayahead energy price is below 50 to bid on DOWN direction #####    
+    revenue_down = 0.8 * (df2['down_capacity_price'] - df2['down_energy_price']) - df['Day-ahead Energy Price']
+    df2.loc[(df['boiler_active_dayahead'] == 0) & (revenue_down > 0), 'Bid_DOWN'] = 1
+
 
     # for idx in range(23):
         # if df.loc[idx, 'boiler_active_dayahead'] == 1:
