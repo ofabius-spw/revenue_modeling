@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-def schedule_day_ahead(df, Palt=50, Hs=0, Hw=0):
+def schedule_day_ahead(df, max_hours_per_month=None, Palt=50, ):
     """
     Schedule e-boiler operation based on dayahead market prices.
     """
@@ -9,21 +9,26 @@ def schedule_day_ahead(df, Palt=50, Hs=0, Hw=0):
     df['boiler_active_dayahead'] = 0  # Default: Boiler off
 
     # Determine minimum hours for season (simplified: assuming winter if month >=10 or <=3)
-    df['month'] = df['utc_timestamp'].dt.month
-    min_hours = np.where(df['month'].isin([10, 11, 12, 1, 2, 3]), Hw, Hs)
-    
-    # Select the cheapest min_hours slots
-    cheapest_hours = df.nsmallest(min_hours[0], 'Day-ahead Energy Price')['utc_timestamp']
-  
+    if max_hours_per_month is not None:
+        month = df['utc_timestamp'].dt.month.iloc[0]
+        max_hours = max_hours_per_month[month]
+    else:
+        max_hours=24
+
+    # Select the cheapest max_hours slots
+    cheapest_hours = df.nsmallest(max_hours, 'Day-ahead Energy Price')['utc_timestamp']
+    # print(cheapest_hours, 'cheapest hours')
     df.loc[df['utc_timestamp'].isin(cheapest_hours), 'boiler_active_dayahead'] = 1
-    
+    # print(df.loc[:, 'boiler_active_dayahead'], 'boiler active dayahead')
     # Sort remaining hours where boiler is off by price
-    remaining_off_hours = df[df['boiler_active_dayahead'] == 0].sort_values(by='Day-ahead Energy Price')
+    on_hours = df[df['boiler_active_dayahead'] == 1]
     
-    # Turn on boiler if dayahead price < alternative heating price
-    for idx in remaining_off_hours.index:
-        if df.loc[idx, 'Day-ahead Energy Price'] < Palt:
-            df.loc[idx, 'boiler_active_dayahead'] = 1
+    # Turn off boiler if dayahead price > alternative heating price
+    for idx in on_hours.index:
+        if df.loc[idx, 'Day-ahead Energy Price'] > Palt:
+            df.loc[idx, 'boiler_active_dayahead'] = 0
+
+    df['max_dayahead_hours'] = max_hours # for output reporting only
 
     return df
 
@@ -60,6 +65,19 @@ def bid_balancing_market(df):
             # input('Press Enter to continue...')
 
     return df2
+
+def initialize_output_columns(df):
+    
+    df['V_dayahead'] = 0.
+    df['V_bal_up_energy'] = 0.
+    df['V_bal_up_capacity'] = 0.
+    df['V_bal_down_energy'] = 0.
+    df['V_bal_down_capacity'] = 0.
+    df['V_energyvalue_balancing_up'] = 0.
+    df['V_energyvalue_balancing_down'] = 0.
+    df['max_dayahead_hours'] = 0 # used only for output reporting
+
+    return df
 
 def calculate_bid_acceptance(df, bpp):
     """
@@ -134,7 +152,6 @@ def calculate_revenue(df, bpp):
 
         elif df.loc[idx, 'Bid_DOWN'] == 1:
             df.loc[idx, 'V_bal_down_energy'] = df.loc[idx, 'down_energy_price'] * df.loc[idx, 'bid_acceptance_probability']
-            # TODO: check this next line
             df.loc[idx, 'V_bal_down_capacity'] += df.loc[idx, 'down_capacity_price'] - df.loc[idx, 'down_energy_price']
             df.loc[idx, 'V_energyvalue_balancing_down'] += Palt
 
@@ -180,7 +197,7 @@ def merge_overlapping_timeframes(df1, df2):
 
     return merged_df
 
-def main(bpp, dayahead_file='dayahead_prices.csv', balancing_file='Finland - mFRR 2024 - Export for bc model.csv', alternative_energy_price=50, Hs=0, Hw=0, output_file='results_eboiler.csv'):
+def main(bpp, dayahead_file='dayahead_prices.csv', balancing_file='Finland - mFRR 2024 - Export for bc model.csv', alternative_energy_price=50, max_hours_per_month=None, output_file='results_eboiler.csv'):
     """
     Main function to process dayahead scheduling, balancing market bidding, and calculate revenues.
     """
@@ -205,13 +222,7 @@ def main(bpp, dayahead_file='dayahead_prices.csv', balancing_file='Finland - mFR
     first_complete_day = df[df['utc_timestamp'].dt.hour == 0].iloc[0]['utc_timestamp'].date()
 
     # add output columns to fill
-    df['V_dayahead'] = 0.
-    df['V_bal_up_energy'] = 0.
-    df['V_bal_up_capacity'] = 0.
-    df['V_bal_down_energy'] = 0.
-    df['V_bal_down_capacity'] = 0.
-    df['V_energyvalue_balancing_up'] = 0.
-    df['V_energyvalue_balancing_down'] = 0.
+    df = initialize_output_columns(df)
     
     # Iterate over slices of the dataframe corresponding to full days
     processed_days = []
@@ -222,7 +233,7 @@ def main(bpp, dayahead_file='dayahead_prices.csv', balancing_file='Finland - mFR
         # Check if the slice contains 24 rows (one for each hour)
         if len(day_slice) == 24:
             # Call functions with the selected day slice
-            day_slice = schedule_day_ahead(day_slice, Palt=alternative_energy_price, Hs=Hs, Hw=Hw)
+            day_slice = schedule_day_ahead(day_slice, max_hours_per_month=max_hours_per_month, Palt=alternative_energy_price)
             day_slice = bid_balancing_market(day_slice)
             day_slice = calculate_revenue(day_slice, bpp)
             
@@ -251,8 +262,11 @@ if __name__ == '__main__':
     'activation_derating_factor_up':    0.3 ,
     'price_alternative_energy':         50.
     }
-    minimum_operational_hours_summer = 0
-    minimum_operational_hours_winter = 0
+    # set maximum operational hours for each month
+    max_hours_per_month = {1: 24, 2: 24, 3: 16, 4: 16, 5: 8, 6: 2, 7: 2, 8: 2, 9: 8, 10: 16, 11: 16, 12: 24}
+    # optional: set all months to 24 by uncommenting next line
+    # max_hours_per_month = {i: 24 for i in range(1, 13)}
+
     # Run the main function
-    df_results = main(bid_price_parameters, dayahead_file='dayahead_prices_finland_2024.csv', balancing_file='Finland - mFRR 2024 - Export for bc model.csv', Hs=minimum_operational_hours_summer, Hw=minimum_operational_hours_winter)
+    df_results = main(bid_price_parameters, dayahead_file='dayahead_prices_finland_2024.csv', balancing_file='Finland - mFRR 2024 - Export for bc model.csv', max_hours_per_month=max_hours_per_month)
     df_results.to_csv('spoton_model_results.csv')
