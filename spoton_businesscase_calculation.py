@@ -53,7 +53,7 @@ def bid_balancing_market(df):
     df2.loc[(df['boiler_active_dayahead'] == 0) & (revenue_down > 0), 'Bid_DOWN'] = 1
 
 
-    # for idx in range(23):
+    # for idx in range(24):
         # if df.loc[idx, 'boiler_active_dayahead'] == 1:
             # print('boiler status', df.loc[idx, 'boiler_active_dayahead'])
             # print('up price:', df.loc[idx, 'up_energy_price'])
@@ -131,14 +131,14 @@ def calculate_revenue(df, bpp):
     outputs:
     df: the dataframe with the data for same moments (rows) as the input, updated with the calculated revenues
     """
-    df = df.copy()
+    df2 = df.copy()
 
     Palt = bpp['price_alternative_energy']
     # Calculate bid acceptance for each hour in the dataframe of the day
     accept_capacity_down, accept_energy_down, accept_capacity_up, accept_energy_up = calculate_bid_acceptance(df, bpp)
 
     # calculate value in dayahead market for all active hours, including the ones where we bid in the balancing market
-    df['V_dayahead'] = df['boiler_active_dayahead'] * (Palt - df['Day-ahead Energy Price'])
+    df2['V_dayahead'] = df['boiler_active_dayahead'] * (Palt - df['Day-ahead Energy Price'])
     for idx in df.index:
         # removed: we do not calculate valiue based on dayahead price if our bid on the market is accepted; we do not get the dayahead price then
         # if df.loc[idx, 'boiler_active_dayahead'] == 1: # if boiler activated
@@ -147,16 +147,16 @@ def calculate_revenue(df, bpp):
 
         if df.loc[idx, 'Bid_UP'] == 1:
 
-            df.at[idx, 'V_bal_up_capacity'] += df.at[idx,'up_capacity_price'] * accept_capacity_up[idx].astype(float)
-            df.loc[idx, 'V_bal_up_energy'] += df.loc[idx,'up_energy_price'] * accept_energy_up[idx].astype(float)
-            df.loc[idx, 'V_energyvalue_balancing_up'] += -Palt
+            df2.at[idx, 'V_bal_up_capacity'] += df.at[idx,'up_capacity_price'] * accept_capacity_up[idx].astype(float)
+            df2.loc[idx, 'V_bal_up_energy'] += df.loc[idx,'up_energy_price'] * accept_energy_up[idx].astype(float)
+            df2.loc[idx, 'V_energyvalue_balancing_up'] += -Palt
 
         elif df.loc[idx, 'Bid_DOWN'] == 1:
-            df.loc[idx, 'V_bal_down_energy'] = df.loc[idx, 'down_energy_price'] * df.loc[idx, 'bid_acceptance_probability']
-            df.loc[idx, 'V_bal_down_capacity'] += df.loc[idx, 'down_capacity_price'] - df.loc[idx, 'down_energy_price']
-            df.loc[idx, 'V_energyvalue_balancing_down'] += Palt
+            df2.loc[idx, 'V_bal_down_energy'] = df.loc[idx, 'down_energy_price'] * df.loc[idx, 'bid_acceptance_probability']
+            df2.loc[idx, 'V_bal_down_capacity'] += df.loc[idx, 'down_capacity_price'] - df.loc[idx, 'down_energy_price']
+            df2.loc[idx, 'V_energyvalue_balancing_down'] += Palt
 
-    return df
+    return df2
 
 def convert_to_float_and_fill(df, columns):
     """
