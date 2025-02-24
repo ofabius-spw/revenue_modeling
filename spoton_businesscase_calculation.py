@@ -199,18 +199,28 @@ def merge_overlapping_timeframes(df1, df2):
 
     return merged_df
 
-def main(bpp, dayahead_file='dayahead_prices.csv', balancing_file='Finland - mFRR 2024 - Export for bc model.csv', alternative_energy_price=50, max_hours_per_month=None, output_file='results_eboiler.csv'):
+def main(bpp, dayahead_file='dayahead_prices.csv', balancing_file='Finland - mFRR 2024 - Export for bc model.csv', alternative_energy_price=50, max_hours_per_month=None, experiment_name='unnamed_experiment.csv'):
     """
     Main function to process dayahead scheduling, balancing market bidding, and calculate revenues.
     """
     # Read dayahead prices
     df_da = pd.read_csv(dayahead_file, delimiter=',')
+    print('------------------------------- input dayahead prices ----------------------------')
+    print(df_da)
+    print('------------------------------ end input dayahead prices -------------------------')
+    df_da.to_csv(experiment_name + '_input_dayahead.csv')
     df_da = df_da.assign(utc_timestamp=pd.to_datetime(df_da['utc_timestamp']))
     # NB we impute with mean values
     df_da = convert_to_float_and_fill(df_da, ['Day-ahead Energy Price']) 
  
     # Read balancing market data  
     df_bal = pd.read_csv(balancing_file, parse_dates=['startTime'])
+
+    df_bal.to_csv(experiment_name + '_input_mFRR.csv')
+    print('------------------------------- input mFRR data ----------------------------')
+    print(df_bal)
+    print('------------------------------ end input mFRR data -------------------------')
+
     df_bal.rename(columns={'startTime': 'utc_timestamp'}, inplace=True)
     df_bal['utc_timestamp'] = df_bal['utc_timestamp'].dt.tz_localize(None)
     # NB we impute with mean values
@@ -242,18 +252,20 @@ def main(bpp, dayahead_file='dayahead_prices.csv', balancing_file='Finland - mFR
             # Append the processed day slice to the list
             processed_days.append(day_slice)
             
-            print(f'Processed day: {day}')
+            # print(f'Processed day: {day}')
             
         else:
             print(f'Warning: Missing data for day {day}, skipping.')
     # Concatenate all processed day slices into a single dataframe
     df_processed = pd.concat(processed_days)
     df_processed.reset_index(drop=True, inplace=True)
-    print(f'All days processed')
+    print(f'Finished processing')
 
     return df_processed
 
 if __name__ == '__main__':
+
+    experiment_name = 'test_experiment_24022025'
     # set bid price parameters (float)
     bid_price_parameters = {
     'bid_price_energy_up':              50. ,
@@ -270,5 +282,6 @@ if __name__ == '__main__':
     # max_hours_per_month = {i: 24 for i in range(1, 13)}
 
     # Run the main function
-    df_results = main(bid_price_parameters, dayahead_file='dayahead_prices_finland_2024.csv', balancing_file='Finland - mFRR 2024_CAP+ENE_new.xlsx - export_for_optimize_model.csv', max_hours_per_month=max_hours_per_month)
-    df_results.to_csv('spoton_model_results.csv')
+    df_results = main(bid_price_parameters, dayahead_file='dayahead_prices_finland_2024.csv', balancing_file='Finland - mFRR 2024_CAP+ENE_new.xlsx - export_for_optimize_model.csv', max_hours_per_month=max_hours_per_month, experiment_name=experiment_name)
+    df_results.to_csv(experiment_name + '_model_results.csv')
+    print("results saved with experimentname", experiment_name)
