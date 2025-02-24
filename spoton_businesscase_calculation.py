@@ -53,7 +53,8 @@ def bid_balancing_market(df):
     df2.loc[(df['boiler_active_dayahead'] == 0) & (revenue_down > 0), 'Bid_DOWN'] = 1
 
 
-    # for idx in range(24):
+    # for idx in range(1, 24):
+
         # if df.loc[idx, 'boiler_active_dayahead'] == 1:
             # print('boiler status', df.loc[idx, 'boiler_active_dayahead'])
             # print('up price:', df.loc[idx, 'up_energy_price'])
@@ -208,7 +209,7 @@ def main(bpp, dayahead_file='dayahead_prices.csv', balancing_file='Finland - mFR
     # NB we impute with mean values
     df_da = convert_to_float_and_fill(df_da, ['Day-ahead Energy Price']) 
  
-    # Read balancing market data
+    # Read balancing market data  
     df_bal = pd.read_csv(balancing_file, parse_dates=['startTime'])
     df_bal.rename(columns={'startTime': 'utc_timestamp'}, inplace=True)
     df_bal['utc_timestamp'] = df_bal['utc_timestamp'].dt.tz_localize(None)
@@ -216,7 +217,7 @@ def main(bpp, dayahead_file='dayahead_prices.csv', balancing_file='Finland - mFR
     df_bal = convert_to_float_and_fill(df_bal, ['up_energy_price', 'down_energy_price','up_equivalent_price', 'down_equivalent_price','bid_acceptance_probability'])
     
     # Merge dataframes on overlapping timeframes
-    df = merge_overlapping_timeframes(df_da, df_bal)
+    df = merge_overlapping_timeframes(df_bal, df_da)
 
     # Assuming df is already loaded and 'utc_timestamp' is a datetime object
     # Set Day 0 based on the first complete day
@@ -269,5 +270,5 @@ if __name__ == '__main__':
     # max_hours_per_month = {i: 24 for i in range(1, 13)}
 
     # Run the main function
-    df_results = main(bid_price_parameters, dayahead_file='dayahead_prices_finland_2024.csv', balancing_file='Finland - mFRR 2024 - Export for bc model.csv', max_hours_per_month=max_hours_per_month)
+    df_results = main(bid_price_parameters, dayahead_file='dayahead_prices_finland_2024.csv', balancing_file='Finland - mFRR 2024_CAP+ENE_new.xlsx - export_for_optimize_model.csv', max_hours_per_month=max_hours_per_month)
     df_results.to_csv('spoton_model_results.csv')
