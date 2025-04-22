@@ -59,12 +59,12 @@ if delay_minutes >= ptu_duration:
     st.stop()
 
 activation_cost_up_eur = st.sidebar.number_input("Activation cost for positive imbalance (EUR/MW)", min_value=0.0, value=800.0)
-activation_cost_down_eur = st.sidebar.number_input("Activation cost for negative imbalance (EUR/MW)", min_value=0.0, value=100.0)
+activation_cost_down_eur = st.sidebar.number_input("Activation cost for negative imbalance (EUR/MW)", value=100.0)
 exchange_rate = st.sidebar.number_input("Exchange rate: 1 unit of input currency = ? EUR", min_value=0.0001, value=1.0)
 activate_above = st.sidebar.number_input("Activate above price (input currency per MW)", value=1200.0)
 activate_below = st.sidebar.number_input("Activate below price (input currency per MW)", value=-500.0)
-false_negatives = st.sidebar.slider("False Negatives (%)", min_value=0, max_value=100, value=0)
-false_positives = st.sidebar.slider("False Positives (%)", min_value=0, max_value=100, value=0)
+false_negatives = st.sidebar.number_input("False negatives: Percentage of large-price PTUs with no activation", min_value=0.00, max_value=100.00, value=0.00)
+false_positives = st.sidebar.number_input("False positives: Percentage of small-price PTUs with (potentially unwanted) activation", min_value=0.00, max_value=100.00, value=0.00)
 start_of_first_ptu = st.sidebar.text_input("Start of first PTU (e.g., 2024-01-01 00:00)", value="2024-01-01 00:00")
 
 if uploaded_file:
