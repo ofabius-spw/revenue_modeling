@@ -33,8 +33,7 @@ def calculate_savings(decisions, prices, activation_cost_up_eur, activation_cost
     savings = []
     efficiency = max(0, 1 - delay_minutes / ptu_duration)
     for decision, price in zip(decisions, prices):
-        # Calculate the duration of activation in hours
-        duration_in_hours = (ptu_duration) / 60
+        duration_in_hours = ptu_duration / 60
         if decision == 1:
             saving = (price - activation_cost_up_eur) * efficiency * duration_in_hours
         elif decision == 2:
@@ -63,8 +62,8 @@ activation_cost_down_eur = st.sidebar.number_input("Activation cost for negative
 exchange_rate = st.sidebar.number_input("Exchange rate: 1 unit of input currency = ? EUR", min_value=0.0001, value=1.0)
 activate_above = st.sidebar.number_input("Activate above price (input currency per MW)", value=1200.0)
 activate_below = st.sidebar.number_input("Activate below price (input currency per MW)", value=-500.0)
-false_negatives = st.sidebar.number_input("False negatives: Percentage of large-price PTUs with no activation", min_value=0.00, max_value=100.00, value=0.00)
-false_positives = st.sidebar.number_input("False positives: Percentage of small-price PTUs with (potentially unwanted) activation", min_value=0.00, max_value=100.00, value=0.00)
+false_negatives = st.sidebar.number_input("False negatives (%)", min_value=0.00, max_value=100.00, value=0.00)
+false_positives = st.sidebar.number_input("False positives (%)", min_value=0.00, max_value=100.00, value=0.00)
 start_of_first_ptu = st.sidebar.text_input("Start of first PTU (e.g., 2024-01-01 00:00)", value="2024-01-01 00:00")
 
 if uploaded_file:
@@ -74,21 +73,29 @@ if uploaded_file:
     dialect = sniffer.sniff(content.splitlines()[0])
     delimiter = dialect.delimiter
 
-    # Read CSV with detected delimiter
+    # Read CSV
     df = pd.read_csv(io.StringIO(content), delimiter=delimiter)
 
-    # Let user select the price column
-    selected_column = st.selectbox("Select the column containing imbalance prices (input currency per MW)", df.columns)
+    # Select actual imbalance price column
+    selected_column = st.selectbox("Select the column with **actual imbalance prices** (used for savings calculation)", df.columns)
 
-    # Ensure numeric
+    # Optional: forecast column for decision-making
+    forecast_column = st.selectbox(
+        "Optional: Select a column with **forecast imbalance prices** (used only for activation decisions)",
+        ["<Use actual prices>"] + list(df.columns),
+        index=0
+    )
+
     try:
         df[selected_column] = df[selected_column].astype(float)
+        if forecast_column != "<Use actual prices>":
+            df[forecast_column] = df[forecast_column].astype(float)
     except ValueError:
-        st.error(f"The selected column '{selected_column}' contains non-numeric values. Please select a numeric column.")
+        st.error("Selected column(s) contain non-numeric values.")
         st.stop()
 
-    # Convert to EUR (only imbalance prices, not activation costs)
     df['price_eur'] = df[selected_column] * exchange_rate
+    decision_prices = df[forecast_column] * exchange_rate if forecast_column != "<Use actual prices>" else df['price_eur']
 
     # Generate timestamps
     try:
@@ -98,11 +105,12 @@ if uploaded_file:
         st.error(f"Error parsing start time: {e}")
         st.stop()
 
-    # Activation decisions and apply delay
+    # Generate activation decisions based on forecast or actual
     raw_decisions = generate_activation_decisions(
-        df['price_eur'], activate_above, activate_below,
-        false_negatives, false_positives
+        decision_prices, activate_above, activate_below, false_negatives, false_positives
     )
+
+    # Apply delay
     delay_ptus = delay_minutes // ptu_duration
     df['resource_activated'] = 0
     if delay_ptus > 0:
@@ -110,25 +118,21 @@ if uploaded_file:
     else:
         df['resource_activated'] = raw_decisions
 
-    # Calculate savings
+    # Calculate savings using actual prices
     df['savings'] = calculate_savings(
         df['resource_activated'], df['price_eur'], activation_cost_up_eur,
         activation_cost_down_eur, delay_minutes, ptu_duration
     )
 
-    # Calculate activation costs
+    # Activation cost and metadata
     df['activation_cost'] = df['resource_activated'].apply(lambda x: activation_cost_up_eur if x == 1 else (activation_cost_down_eur if x == 2 else 0))
-
-    # Calculate decision per PTU (already in the data)
     df['decision'] = df['resource_activated']
-
-    # Calculate day from start
     df['day_from_start'] = (df.index // (60 / ptu_duration * 24)).astype(int) + 1
 
-    # Select columns to export
+    # Export dataframe
     df_export = df[['timestamp', selected_column, 'decision', 'activation_cost', 'savings', 'day_from_start']]
 
-    # Daily aggregation
+    # Daily savings aggregation
     df['day'] = (df.index // (60 / ptu_duration * 24)).astype(int) + 1
     daily_savings = df.groupby('day')['savings'].sum().reset_index()
 
