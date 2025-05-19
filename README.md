@@ -2,6 +2,14 @@
 
 updated 19-05-2025
 
+Use FLEXBALANCE SAVINGS CALCULATOR online:
+https://fb-savings.streamlit.app/
+
+To run locally:
+
+- install requirements
+- navigate to folder
+- execute "streamlit run flexbalance_savings_streamlit.py"
 
 TO RUN SPOTON BUSINESS CALCULATION:
 dependencies:
