@@ -1,13 +1,15 @@
 # revenue_modeling
 
-updated 17-02-2025
+updated 19-05-2025
 
+
+TO RUN SPOTON BUSINESS CALCULATION:
 dependencies:
 
 numpy
 pandas
 
-TO RUN:
+
 1. navigate to correct folder
 2. place input files in the same folder as a csv file:
  a. dayahead prices:
