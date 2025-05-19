@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import r2_score
 
 # Load merged dataframe
-df = pd.read_csv('ptu_with_estimates.csv')
+df = pd.read_csv('BE_imbalance_with_Elia_estimates.csv')
 
 # Target variables
 true_col = "- Imbalance Price [EUR/MWh] - SCA|BE"

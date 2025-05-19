@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import csv
 import io
+import altair as alt
 
 # --- Functions ---
 def generate_activation_decisions(prices, activate_above, activate_below, false_neg_rate, false_pos_rate):
@@ -42,6 +43,46 @@ def calculate_savings(decisions, prices, activation_cost_up_eur, activation_cost
             saving = 0
         savings.append(saving)
     return savings
+
+def select_daily_activations(df, max_activations_per_day=None, strategy="first", ptu_per_day=96):
+    """
+    Limits activations to a maximum number per day.
+
+    Parameters:
+    - df: DataFrame with a boolean 'activation' column and a 'profit' column
+    - max_activations_per_day: int or None. Max number of activations allowed per day.
+    - strategy: 'first' or 'best'. Selection method.
+    - ptu_per_day: Number of PTUs in a day (default = 96 for 15min PTUs)
+
+    Returns:
+    - DataFrame with updated 'activation' column
+    """
+    if max_activations_per_day is None:
+        return df  # no restriction
+
+    df = df.copy()
+    df['day_number'] = df.index // ptu_per_day
+
+    # Set all activations to False first
+    df['activation'] = False
+
+    for day, group in df.groupby('day_number'):
+        activatable = group[group['profit'] > 0]
+        if activatable.empty:
+            continue
+
+        if strategy == 'first':
+            selected_indices = activatable.head(max_activations_per_day).index
+        elif strategy == 'best':
+            selected_indices = activatable.sort_values('profit', ascending=False).head(max_activations_per_day).index
+        else:
+            raise ValueError("strategy must be either 'first' or 'best'")
+
+        df.loc[selected_indices, 'activation'] = True
+
+    df.drop(columns='day_number', inplace=True)
+    return df
+
 
 # --- Streamlit App ---
 st.title("Energy Flexibility Savings Calculator")
@@ -127,21 +168,115 @@ if uploaded_file:
     # Activation cost and metadata
     df['activation_cost'] = df['resource_activated'].apply(lambda x: activation_cost_up_eur if x == 1 else (activation_cost_down_eur if x == 2 else 0))
     df['decision'] = df['resource_activated']
-    df['day_from_start'] = (df.index // (60 / ptu_duration * 24)).astype(int) + 1
+    df['day_from_start'] = (np.arange(len(df)) // (60 / ptu_duration * 24)).astype(int) + 1
 
     # Export dataframe
     df_export = df[['timestamp', selected_column, 'decision', 'activation_cost', 'savings', 'day_from_start']]
 
     # Daily savings aggregation
-    df['day'] = (df.index // (60 / ptu_duration * 24)).astype(int) + 1
+    df['day'] = (np.arange(len(df)) // (60 / ptu_duration * 24)).astype(int) + 1
     daily_savings = df.groupby('day')['savings'].sum().reset_index()
 
-    # Annualized metric
+    # Annualized metrics
     total_savings = df['savings'].sum()
     total_hours = (len(df) * ptu_duration) / 60
-    annualized_savings = (total_savings / total_hours) * 8760
+    gross_revenue = (df['savings'] + df['activation_cost']).sum()
+    gross_annualized = (gross_revenue / total_hours) * 8760
+    net_annualized = (total_savings / total_hours) * 8760
 
-    st.metric("Potential Savings per MW per Year (EUR)", f"{annualized_savings:,.2f}")
+    st.metric("Gross Revenues per MW per Year (EUR)", f"{gross_annualized:,.2f}")
+    st.metric("Net Revenues per MW per Year (EUR)", f"{net_annualized:,.2f}")
+
+    st.subheader("Daily Savings (EUR)")
+    st.line_chart(daily_savings.set_index('day'))
+
+    st.subheader("Inspect PTU-Level Savings for a Specific Day Number")
+
+    max_day = df['day'].max()
+    selected_day = st.selectbox("Select day number to inspect PTU-level costs", options=[None] + list(range(1, max_day + 1)), index=0)
+
+    if selected_day is not None:
+        filtered_df = df[df['day'] == selected_day].copy()
+        filtered_decision_prices = decision_prices.loc[filtered_df.index]
+
+        filtered_df['gross_savings'] = filtered_df['savings'] + filtered_df['activation_cost']
+
+        ptu_chart_df = pd.DataFrame({
+            'timestamp': filtered_df['timestamp'],
+            'Net Savings (EUR)': filtered_df['savings'],
+            'Gross Savings (EUR)': filtered_df['gross_savings'],
+            'Imbalance Price (EUR/MW)': filtered_df['price_eur'],
+            'Forecast Price (EUR/MW)': filtered_decision_prices
+        })
+
+        line_order = [
+            ('Forecast Price (EUR/MW)', 'green'),
+            ('Imbalance Price (EUR/MW)', 'red'),
+            ('Gross Savings (EUR)', '#1f77b4'),
+            ('Net Savings (EUR)', '#9467bd')
+        ]
+
+        # Convert to long format for Altair legend support
+        ptu_chart_df_long = ptu_chart_df.melt(
+            id_vars=['timestamp'],
+            value_vars=[metric for metric, _ in line_order],
+            var_name='Metric', value_name='Value'
+        )
+
+        color_scale = alt.Scale(
+            domain=[metric for metric, _ in line_order],
+            range=[color for _, color in line_order]
+        )
+
+        ptu_chart_with_legend = alt.Chart(ptu_chart_df_long).mark_line().encode(
+            x=alt.X('timestamp:T', title='Timestamp'),
+            y=alt.Y('Value:Q', title='EUR'),
+            color=alt.Color('Metric:N', scale=color_scale, legend=alt.Legend(title="Metrics")),
+            tooltip=['timestamp:T', 'Metric', 'Value']
+        ).properties(height=350)
+
+        st.altair_chart(ptu_chart_with_legend, use_container_width=True)
+    else:
+        st.info("Select a day number above to display PTU-level savings and prices.")
+
+
+    # Activation statistics section (toggle)
+    if st.checkbox("Show Activation Statistics"):
+        st.subheader("Activation Statistics")
+
+        total_activations = (df['resource_activated'] != 0).sum()
+        total_days = (df['timestamp'].max() - df['timestamp'].min()).days + 1
+        avg_activations_per_day = total_activations / total_days if total_days > 0 else total_activations
+
+        loss_mask = (df['resource_activated'] != 0) & (df['savings'] < -1)
+
+        percent_loss_activations = 100 * loss_mask.sum() / total_activations if total_activations > 0 else 0
+
+        price_based_loss = df.apply(lambda row: (
+            row['price_eur'] < 0 if row['resource_activated'] == 1
+            else row['price_eur'] > 0 if row['resource_activated'] == 2
+            else False
+        ), axis=1)
+        percent_price_loss_activations = 100 * price_based_loss.sum() / total_activations if total_activations > 0 else 0
+
+        activations_per_day = df[df['resource_activated'] != 0].groupby('day')['resource_activated'].count()
+        max_activations_in_day = activations_per_day.max() if not activations_per_day.empty else 0
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Total activations", f"{total_activations}")
+        col1.metric("Avg activations/day", f"{avg_activations_per_day:.1f}")
+        col2.metric("% PTUs activated with net loss", f"{percent_loss_activations:.1f}%")
+        col2.metric("% PTUs gross loss (wrong direction)", f"{percent_price_loss_activations:.1f}%")
+        col3.metric("Max activations/day", f"{max_activations_in_day}")
+
+        st.subheader("Daily Activation Count")
+        daily_activations = df[df['resource_activated'] != 0].groupby('timestamp').size().resample('D').sum().reset_index(name='count')
+        daily_chart = alt.Chart(daily_activations).mark_line().encode(
+            x='timestamp:T',
+            y=alt.Y('count:Q', title='Activations'),
+            tooltip=['timestamp:T', 'count:Q']
+        ).properties(height=300)
+        st.altair_chart(daily_chart, use_container_width=True)
 
     st.download_button(
         label="Download Results as CSV",
@@ -149,6 +284,3 @@ if uploaded_file:
         file_name='savings_results.csv',
         mime='text/csv'
     )
-
-    st.subheader("Daily Savings (EUR)")
-    st.line_chart(daily_savings.set_index('day'))
