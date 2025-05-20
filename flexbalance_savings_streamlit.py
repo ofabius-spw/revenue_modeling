@@ -6,7 +6,7 @@ import io
 import altair as alt
 
 # --- Functions ---
-def generate_activation_decisions(prices, activate_above, activate_below, false_neg_rate, false_pos_rate):
+def generate_activation_decisions(prices, activate_above, activate_below, false_neg_rate, false_pos_rate, max_activations_per_day=None):
     decisions = []
     for price in prices:
         if price > activate_above:
@@ -44,44 +44,35 @@ def calculate_savings(decisions, prices, activation_cost_up_eur, activation_cost
         savings.append(saving)
     return savings
 
-def select_daily_activations(df, max_activations_per_day=None, strategy="first", ptu_per_day=96):
-    """
-    Limits activations to a maximum number per day.
+def limit_daily_activations(decisions, max_decisions, availability_mask):
+    # Create a copy to avoid modifying the original array
+    decisions = decisions.copy()
+    
+    # Process the array in chunks of 96
+    n = len(decisions)
+    for start in range(0, n, 96):
 
-    Parameters:
-    - df: DataFrame with a boolean 'activation' column and a 'profit' column
-    - max_activations_per_day: int or None. Max number of activations allowed per day.
-    - strategy: 'first' or 'best'. Selection method.
-    - ptu_per_day: Number of PTUs in a day (default = 96 for 15min PTUs)
-
-    Returns:
-    - DataFrame with updated 'activation' column
-    """
-    if max_activations_per_day is None:
-        return df  # no restriction
-
-    df = df.copy()
-    df['day_number'] = df.index // ptu_per_day
-
-    # Set all activations to False first
-    df['activation'] = False
-
-    for day, group in df.groupby('day_number'):
-        activatable = group[group['profit'] > 0]
-        if activatable.empty:
-            continue
-
-        if strategy == 'first':
-            selected_indices = activatable.head(max_activations_per_day).index
-        elif strategy == 'best':
-            selected_indices = activatable.sort_values('profit', ascending=False).head(max_activations_per_day).index
+        # End index is either the next 96 elements or end of array
+        end = min(start + 96, n)
+        
+        # Get the current chunk (a full or partial day)
+        day_slice = decisions[start:end]
+        if len(day_slice) == len(availability_mask):
+            day_slice = day_slice * availability_mask
         else:
-            raise ValueError("strategy must be either 'first' or 'best'")
+            # If the length of the day_slice is less than 96, apply the mask only to the available part
+            day_slice = day_slice * availability_mask[:len(day_slice)]
 
-        df.loc[selected_indices, 'activation'] = True
-
-    df.drop(columns='day_number', inplace=True)
-    return df
+        # Find indices where decisions are nonzero
+        nonzero_indices = np.nonzero(day_slice)[0]
+        decisions[start:end] = day_slice
+        # If there are more nonzero decisions than allowed, set the extras to 0
+        if len(nonzero_indices) > max_decisions:
+            indices_to_zero = nonzero_indices[max_decisions:]
+            # Apply the change to the appropriate slice of the original array
+            decisions[start + indices_to_zero] = 0
+            
+    return decisions
 
 
 # --- Streamlit App ---
@@ -100,9 +91,18 @@ if delay_minutes >= ptu_duration:
 
 activation_cost_up_eur = st.sidebar.number_input("Activation cost for positive imbalance (EUR/MW)", min_value=0.0, value=800.0)
 activation_cost_down_eur = st.sidebar.number_input("Activation cost for negative imbalance (EUR/MW)", value=100.0)
-exchange_rate = st.sidebar.number_input("Exchange rate: 1 unit of input currency = ? EUR", min_value=0.0001, value=1.0)
+max_activations_per_day = st.sidebar.number_input("Maximum number of asset activations per day", value=96, min_value=1)
+
+st.sidebar.markdown("**NB Availability only works if the first PTU in the dataset is at midnight**")
+availability_start = st.sidebar.number_input("Availability start (hours)", value=0, min_value=0)
+availability_end = st.sidebar.number_input("Availability end (hours)", value=24, min_value=0)
+if availability_start >= availability_end:
+    st.error("Availability start must be smaller than the end time.")
+    st.stop()
 activate_above = st.sidebar.number_input("Activate above price (input currency per MW)", value=1200.0)
 activate_below = st.sidebar.number_input("Activate below price (input currency per MW)", value=-500.0)
+exchange_rate = st.sidebar.number_input("Exchange rate: 1 unit of input currency = ? EUR", min_value=0.0001, value=1.0)
+
 false_negatives = st.sidebar.number_input("False negatives (%)", min_value=0.00, max_value=100.00, value=0.00)
 false_positives = st.sidebar.number_input("False positives (%)", min_value=0.00, max_value=100.00, value=0.00)
 start_of_first_ptu = st.sidebar.text_input("Start of first PTU (e.g., 2024-01-01 00:00)", value="2024-01-01 00:00")
@@ -127,6 +127,7 @@ if uploaded_file:
         index=0
     )
 
+
     try:
         df[selected_column] = df[selected_column].astype(float)
         if forecast_column != "<Use actual prices>":
@@ -147,18 +148,21 @@ if uploaded_file:
         st.stop()
 
     # Generate activation decisions based on forecast or actual
-    raw_decisions = generate_activation_decisions(
+    decisions = generate_activation_decisions(
         decision_prices, activate_above, activate_below, false_negatives, false_positives
     )
+    
+    # decision = 0 for unavailable hours
+    availability_mask = np.zeros(96, dtype=int)
 
-    # Apply delay
-    delay_ptus = delay_minutes // ptu_duration
-    df['resource_activated'] = 0
-    if delay_ptus > 0:
-        df.loc[df.index[delay_ptus]:, 'resource_activated'] = raw_decisions[:-delay_ptus]
-    else:
-        df['resource_activated'] = raw_decisions
+    # Convert hours to quarter-hour indices
+    start_index = availability_start * 4
+    end_index = availability_end * 4  
 
+    # Set mask to 1 for selected range
+    availability_mask[start_index:end_index] = 1
+    decisions = limit_daily_activations(decisions, max_activations_per_day, availability_mask)
+    df['resource_activated'] = decisions
     # Calculate savings using actual prices
     df['savings'] = calculate_savings(
         df['resource_activated'], df['price_eur'], activation_cost_up_eur,
