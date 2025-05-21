@@ -6,15 +6,16 @@ import io
 import altair as alt
 
 # --- Functions ---
-def generate_activation_decisions(prices, activate_above, activate_below, false_neg_rate, false_pos_rate, max_activations_per_day=None):
+def generate_activation_decisions(prices, activate_above, activate_below, false_neg_rate, false_pos_rate, system_imbalances, min_abs_system_imbalance, max_activations_per_day=None):
     decisions = []
-    for price in prices:
-        if price > activate_above:
-            decisions.append(1)  # activate_up
-        elif price < activate_below:
-            decisions.append(2)  # activate_down
-        else:
-            decisions.append(0)  # no activation
+    for price, imbalance in zip(prices, system_imbalances):
+        decision = 0
+        if abs(imbalance) > min_abs_system_imbalance:
+            if price > activate_above:
+                decision = 1 # activate_up
+            elif price < activate_below:
+                decision = 2  # activate_down
+        decisions.append(decision)  # no activation
     decisions = np.array(decisions)
 
     # Apply false negatives (turn 1 or 2 into 0)
@@ -101,6 +102,8 @@ if availability_start >= availability_end:
     st.stop()
 activate_above = st.sidebar.number_input("Activate above price (input currency per MW)", value=1200.0)
 activate_below = st.sidebar.number_input("Activate below price (input currency per MW)", value=-500.0)
+min_abs_sys_imbalance = st.sidebar.number_input("Minimum absolute system imbalance (MW). NB if you use a MWh number (instead of in MW) from the inout csv for this, adjust this value accordingly. For example for 15-minute-ptus, use 40 (MWh) instead of 10 (MW) ", min_value=0.00, value=0.00)
+
 exchange_rate = st.sidebar.number_input("Exchange rate: 1 unit of input currency = ? EUR", min_value=0.0001, value=1.0)
 
 false_negatives = st.sidebar.number_input("False negatives (%)", min_value=0.00, max_value=100.00, value=0.00)
@@ -126,19 +129,21 @@ if uploaded_file:
         ["<Use actual prices>"] + list(df.columns),
         index=0
     )
-
+    system_imbalance_column = st.selectbox("Select the column with *system imbalance** (used for minimum required system imbalance)", ["<No minimum>"] + list(df.columns))
 
     try:
         df[selected_column] = df[selected_column].astype(float)
         if forecast_column != "<Use actual prices>":
             df[forecast_column] = df[forecast_column].astype(float)
+        if system_imbalance_column != "<No minimum>":
+            df[system_imbalance_column] = df[system_imbalance_column].astype(float)
     except ValueError:
         st.error("Selected column(s) contain non-numeric values.")
         st.stop()
 
     df['price_eur'] = df[selected_column] * exchange_rate
     decision_prices = df[forecast_column] * exchange_rate if forecast_column != "<Use actual prices>" else df['price_eur']
-
+    system_imbalance = df[system_imbalance_column] if system_imbalance_column != "<No minimum>" else np.ones_like(df['price_eur'])*10000
     # Generate timestamps
     try:
         start_time = pd.to_datetime(start_of_first_ptu)
@@ -149,7 +154,7 @@ if uploaded_file:
 
     # Generate activation decisions based on forecast or actual
     decisions = generate_activation_decisions(
-        decision_prices, activate_above, activate_below, false_negatives, false_positives
+        decision_prices, activate_above, activate_below, false_negatives, false_positives, system_imbalance, min_abs_sys_imbalance
     )
     
     # decision = 0 for unavailable hours
