@@ -32,18 +32,23 @@ def generate_activation_decisions(prices, activate_above, activate_below, false_
     return decisions
 
 def calculate_savings(decisions, prices, activation_cost_up_eur, activation_cost_down_eur, delay_minutes, ptu_duration):
-    savings = []
+    savings_net = []
+    savings_gross = []
     efficiency = max(0, 1 - delay_minutes / ptu_duration)
     for decision, price in zip(decisions, prices):
         duration_in_hours = ptu_duration / 60
         if decision == 1:
-            saving = (price - activation_cost_up_eur) * efficiency * duration_in_hours
+            saving_gross = price * efficiency * duration_in_hours
+            saving_net = (price - activation_cost_up_eur) * efficiency * duration_in_hours
         elif decision == 2:
-            saving = (-price - activation_cost_down_eur) * efficiency * duration_in_hours
+            saving_gross = -price * efficiency * duration_in_hours
+            saving_net = (-price - activation_cost_down_eur) * efficiency * duration_in_hours
         else:
-            saving = 0
-        savings.append(saving)
-    return savings
+            saving_net = 0
+            saving_gross = 0
+        savings_net.append(saving_net)
+        savings_gross.append(saving_gross)
+    return savings_net, savings_gross
 
 def limit_daily_activations(decisions, max_decisions, availability_mask):
     # Create a copy to avoid modifying the original array
@@ -169,29 +174,30 @@ if uploaded_file:
     decisions = limit_daily_activations(decisions, max_activations_per_day, availability_mask)
     df['resource_activated'] = decisions
     # Calculate savings using actual prices
-    df['savings'] = calculate_savings(
+    df['savings_net'], df['savings_gross'] = calculate_savings(
         df['resource_activated'], df['price_eur'], activation_cost_up_eur,
         activation_cost_down_eur, delay_minutes, ptu_duration
     )
 
     # Activation cost and metadata
-    df['activation_cost'] = df['resource_activated'].apply(lambda x: activation_cost_up_eur if x == 1 else (activation_cost_down_eur if x == 2 else 0))
-    df['decision'] = df['resource_activated']
+    # df['activation_cost'] = df['resource_activated'].apply(lambda x: activation_cost_up_eur if x == 1 else (activation_cost_down_eur if x == 2 else 0))
+    # df['decision'] = df['resource_activated']
     df['day_from_start'] = (np.arange(len(df)) // (60 / ptu_duration * 24)).astype(int) + 1
 
     # Export dataframe
-    df_export = df[['timestamp', selected_column, 'decision', 'activation_cost', 'savings', 'day_from_start']]
+    df_export = df[['timestamp', selected_column, 'resource_activated', 'savings_gross', 'savings_net', 'day_from_start']]
 
     # Daily savings aggregation
     df['day'] = (np.arange(len(df)) // (60 / ptu_duration * 24)).astype(int) + 1
-    daily_savings = df.groupby('day')['savings'].sum().reset_index()
+    daily_savings = df.groupby('day')['savings_net'].sum().reset_index()
 
     # Annualized metrics
-    total_savings = df['savings'].sum()
+    total_net_savings = df['savings_net'].sum()
+    total_gross_savings = df['savings_gross'].sum()
     total_hours = (len(df) * ptu_duration) / 60
-    gross_revenue = (df['savings'] + df['activation_cost']).sum()
-    gross_annualized = (gross_revenue / total_hours) * 8760
-    net_annualized = (total_savings / total_hours) * 8760
+
+    gross_annualized = (total_gross_savings / total_hours) * 8760
+    net_annualized = (total_net_savings / total_hours) * 8760
 
     st.metric("Gross Revenues per MW per Year (EUR)", f"{gross_annualized:,.2f}")
     st.metric("Net Revenues per MW per Year (EUR)", f"{net_annualized:,.2f}")
@@ -208,12 +214,10 @@ if uploaded_file:
         filtered_df = df[df['day'] == selected_day].copy()
         filtered_decision_prices = decision_prices.loc[filtered_df.index]
 
-        filtered_df['gross_savings'] = filtered_df['savings'] + filtered_df['activation_cost']
-
         ptu_chart_df = pd.DataFrame({
             'timestamp': filtered_df['timestamp'],
-            'Net Savings (EUR)': filtered_df['savings'],
-            'Gross Savings (EUR)': filtered_df['gross_savings'],
+            'Net Savings (EUR)': filtered_df['savings_net'],
+            'Gross Savings (EUR)': filtered_df['savings_gross'],
             'Imbalance Price (EUR/MW)': filtered_df['price_eur'],
             'Forecast Price (EUR/MW)': filtered_decision_prices
         })
@@ -257,7 +261,7 @@ if uploaded_file:
         total_days = (df['timestamp'].max() - df['timestamp'].min()).days + 1
         avg_activations_per_day = total_activations / total_days if total_days > 0 else total_activations
 
-        loss_mask = (df['resource_activated'] != 0) & (df['savings'] < -1)
+        loss_mask = (df['resource_activated'] != 0) & (df['savings_net'] < 0)
 
         percent_loss_activations = 100 * loss_mask.sum() / total_activations if total_activations > 0 else 0
 
