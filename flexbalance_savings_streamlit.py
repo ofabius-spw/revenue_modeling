@@ -4,6 +4,7 @@ import numpy as np
 import csv
 import io
 import altair as alt
+import matplotlib.pyplot as plt
 
 # --- Functions ---
 def generate_activation_decisions(prices, activate_above, activate_below, false_neg_rate, false_pos_rate, system_imbalances, min_abs_system_imbalance, max_activations_per_day=None):
@@ -131,14 +132,14 @@ if uploaded_file:
     # Optional: forecast column for decision-making
     forecast_column = st.selectbox(
         "Optional: Select a column with **forecast imbalance prices** (used only for activation decisions)",
-        ["<Use actual prices>"] + list(df.columns),
+        ["<Use actual prices>"] + ["synthetic_prediction"]+list(df.columns),
         index=0
     )
     system_imbalance_column = st.selectbox("Select the column with *system imbalance** (used for minimum required system imbalance)", ["<No minimum>"] + list(df.columns))
 
     try:
         df[selected_column] = df[selected_column].astype(float)
-        if forecast_column != "<Use actual prices>":
+        if forecast_column not in ["<Use actual prices>", "synthetic_prediction"]:
             df[forecast_column] = df[forecast_column].astype(float)
         if system_imbalance_column != "<No minimum>":
             df[system_imbalance_column] = df[system_imbalance_column].astype(float)
@@ -147,8 +148,64 @@ if uploaded_file:
         st.stop()
 
     df['price_eur'] = df[selected_column] * exchange_rate
-    decision_prices = df[forecast_column] * exchange_rate if forecast_column != "<Use actual prices>" else df['price_eur']
+
+    ##################### create synthetic data #####################
+    if forecast_column == "synthetic_prediction":
+        np.random.seed(42)  # For reproducibility
+        st.subheader("Create Synthetic Data for Forecast Imbalance Prices")
+        default_std = float(df['price_eur'].std())
+
+        # === PARAMETERS ===
+        with st.expander("Synthetic Prediction Settings", expanded=True):
+            sqrt_of_dataset = np.sqrt(df['price_eur'] - np.mean(df['price_eur']))
+            st.write("The square root of the dataset is {}. Going above this is not recommended.".format(sqrt_of_dataset.mean()))
+            scalar = st.number_input("Scalar multiplier (applied after sqrt)", value=1.0, max_value=sqrt_of_dataset.max(), min_value=0.0)
+            noise_mean = np.mean(df['price_eur']) # st.number_input("Gaussian noise mean", value=0.0)
+            noise_std = st.number_input("Gaussian noise std", value=np.sqrt(default_std))
+            last_n = st.number_input("Plot last N datapoints", min_value=2, max_value=len(df), value=500)
+
+        # === GENERATE SYNTHETIC DATA ===
+        base_prediction = (
+            np.sqrt(np.abs(df['price_eur']-np.mean(df['price_eur']))) * scalar * np.sign(df['price_eur']-np.mean(df['price_eur'])) + np.mean(df['price_eur']) 
+        )
+        noise = np.random.normal(loc=noise_mean, scale=noise_std, size=len(df))
+        df["synthetic_prediction"] = base_prediction + noise
+
+        # === PLOT ===
+        st.subheader("Real vs Synthetic (Last N Points)")
+        fig, ax = plt.subplots(figsize=(10, 5))
+        last_indices = df.index[-last_n:]
+
+        ax.plot(last_indices, df['price_eur'].iloc[-last_n:], label="Real Value", color="blue", alpha=0.7)
+        ax.plot(last_indices, df["synthetic_prediction"].iloc[-last_n:], label="Synthetic Prediction", color="orange", alpha=0.7)
+
+        ax.set_xlabel("Index")
+        ax.set_ylabel("Value (EUR/MWh)")
+        ax.set_title(f"Real vs Synthetic Prediction (Last {last_n} Points)")
+        ax.grid(True)
+        ax.legend()
+        st.pyplot(fig)
+
+    if forecast_column == "<Use actual prices>":
+        decision_prices = df['price_eur']
+    elif forecast_column == "synthetic_prediction":
+        decision_prices = df['synthetic_prediction']
+    else:
+        decision_prices = df[forecast_column] * exchange_rate
+    # decision_prices = df[forecast_column] * exchange_rate if forecast_column != "<Use actual prices>" else df['price_eur']
     system_imbalance = df[system_imbalance_column] if system_imbalance_column != "<No minimum>" else np.ones_like(df['price_eur'])*10000
+
+        # # === DOWNLOAD UPDATED CSV ===
+        # csv = df.to_csv(index=False).encode("utf-8")
+        # st.download_button(
+        #     label="Download updated CSV",
+        #     data=csv,
+        #     file_name="with_synthetic_predictions.csv",
+        #     mime="text/csv"
+        # )
+    #####################################################################
+
+
     # Generate timestamps
     try:
         start_time = pd.to_datetime(start_of_first_ptu)
