@@ -102,12 +102,12 @@ if pd.api.types.is_numeric_dtype(gdf[column]):
     ))
 
 else:
-    gdf[column] = gdf[column].fillna("Missing")
+    gdf[column] = gdf[column].fillna("No data")
     unique_vals = gdf[column].unique()
 
     palette = px.colors.qualitative.Set2
-    color_map = {val: palette[i % len(palette)] for i, val in enumerate(unique_vals) if val != "Missing"}
-    color_map["Missing"] = "#d3d3d3"  # Light grey
+    color_map = {val: palette[i % len(palette)] for i, val in enumerate(unique_vals) if val != "No data"}
+    color_map["No data"] = "#d3d3d3"  # Light grey
 
     fig = px.choropleth(
         gdf,
