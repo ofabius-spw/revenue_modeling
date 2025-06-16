@@ -1,12 +1,15 @@
-Country,Passive imbalance allowed,gross revenues UP (kEUR/MW),gross revenues DOWN (kEUR/MW),Prohibitive competition?,country left after initial selection,"market depth in MW
- (to 40k per mw)",market depth in EUR (to 40k per mw),Renewable (down) revenue (EUR/MW flex/YR),C&I (up) revenue (EUR/MW flex/YR),C&I (down) revenue (EUR/MW flex/YR),Apetite with BRPs,Conclusion,System imbalance,Imbalance price,,"Addition or Valuestack?
+Country,Passive Imbalance Allowed,Gross Revenues UP (kEUR/MW),Gross Revenues DOWN (kEUR/MW),Prohibitive Competition?,Countries Selected for Further Investigation,"Market Depth in MW
+","Market Depth in €
+ ","Renewables revenue (€
+/MW flex/YR)","C&I UP Revenue (€
+/MW flex/YR)",C&I DOWN revenue (€/MW flex/YR),Apetite with BRPs,Conclusion,System imbalance,Imbalance price,,"Addition or Valuestack?
 
 --> probably too niche. Discuss with Jaap, but probably not relevant"
-Hungary,No,150,2,No problem,yes,100,3000,2,30,2,,,Some information,,,
+Hungary,No,150,2,No problem,yes,100,0,2,,2,,,Some information,,,
 Romania,No,465,958,No problem,yes,150,12000,120,120,120,,,,,,
 Czechia,Yes,131,75,No problem,yes,100,6000,10,60,10,,,Perfect information,Some information,,
 Sweden,No,101,69,No problem,yes,80,4800,40,80,40,,,Good information,Some information,,
-Greece,No,116,16,No problem,yes,300,15000,0,60,0,,,Good information,Good information,,
+Greece,No,116,16,No problem,yes,200,15000,0,60,0,,,Good information,Good information,,
 Finland,No,68,10,No problem,yes,100,6000,40,30,60,,,Good information,Some information,,
 Slovakia,No,18,0,n/a,no,0,0,0,0,0,0,,,,,
 Belgium,Yes,6,115,n/a,no,0,0,0,0,0,0,Not viable without access to balancing markets,,,,VS with BM
